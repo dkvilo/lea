@@ -3,31 +3,12 @@
 * Author: David Kviloria
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <errno.h>
-
-#define LINE_BUFFER_SIZE 128
-
-#define LEA "[Lea Script Reader]\r\n"
-#define TILDE "~\r\n"
-
-struct LeaConfig {
-  int sr, sc;
-  char buffer[LINE_BUFFER_SIZE];
-  int key;
-};
-
-struct LeaConfig Editor;
-struct winsize ws;
+#include "../includes/lea.h"
 
 void drawEdges(int initCall) {
   for (unsigned i = 1; i < Editor.sr; ++i) {
     write(STDOUT_FILENO, TILDE, strlen(TILDE));
-    if (initCall) {
+    if (initCall && Editor.sr / 2 < ws.ws_row) {
       if (i == (Editor.sr - 1)) {
         write(STDOUT_FILENO, LEA, strlen(LEA) -1);
       }
@@ -56,11 +37,11 @@ void moveCursorPositionUp() {
 }
 
 void setCursorPositionForward() {
-  write(STDOUT_FILENO, "\x1b[C", 3); // MOVE CURSOR DOWN
+  write(STDOUT_FILENO, "\x1b[C", 3); // MOVE CURSOR FORWARD
 }
 
 void setCursorPositionBackward() {
-  write(STDOUT_FILENO, "\x1b[D", 3); // MOVE CURSOR DOWN
+  write(STDOUT_FILENO, "\x1b[D", 3); // MOVE CURSOR BACKWARD
 }
 
 int Lea_on_exit() {
@@ -75,14 +56,50 @@ int Lea_sleep (int millisec) {
   return (usleep ((useconds_t) millisec *1000));
 }
 
+void Lea_set_terminal_read_only() {
+  
+  struct termios t;
+  struct termios t_saved;
+
+  tcgetattr(fileno(stdin), &t);
+  t_saved = t;
+
+  t.c_lflag &= (~ICANON & ~ECHO);
+  t.c_cc[VTIME] = 0;
+  t.c_cc[VMIN] = 0;
+
+  if (tcsetattr(fileno(stdin), TCSANOW, &t) < 0) {
+    perror("Unable to set terminal to read-only");
+    exit(-1);
+  }
+  
+}
+
+void Lea_line_rules() {
+  printf("\n\n");
+  setCursorPositionForward();
+  setCursorPositionForward();
+  Editor.sr++;
+}
+
+void Lea_insert_char_rules(int ch) {
+  putchar(ch);
+}
+
 void Lea_read (int delay, const char *string) {
   
   int position = 0;
 
-  do{
-    Lea_sleep (delay);
-    putchar (string[position]);
+  do {
+
+    if (string[position] != ' ') Lea_sleep (delay);
+
+    (string[position] == '\n') 
+      ? Lea_line_rules()
+      : Lea_insert_char_rules(string[position]);
+
     fflush (stdout);
+
   } while (string[position++] != '\0');
 
 }
@@ -95,7 +112,7 @@ void Lea_init() {
   Editor.sc = ws.ws_col;
   
   clearScreen();
-  drawEdges(1);
+  // drawEdges(0);
 
   setCursorPositionHome();
   setCursorPositionForward();
@@ -106,10 +123,9 @@ void Lea_read_from_file(const char *path, unsigned short speed) {
 
   FILE *fp = fopen(path, "r");
 
-  char *linbuf = NULL;
-  size_t siz = 0;
-  ssize_t linlen = 0;
-
+  Editor.buffer = NULL;
+  Editor.size = 0;
+  Editor.length = 0;
 
   if (!fp) {
     perror(" - Error While Processing File");
@@ -118,17 +134,17 @@ void Lea_read_from_file(const char *path, unsigned short speed) {
   
   Lea_init();
 
-  printf("Source: %s\n", path);
-  
-  while ((linlen = getline(&linbuf, &siz, fp)) > 0) {
-    Lea_read(speed, linbuf);  
+  printf("\n  File: %s%s%s\n", Color.Green, path, Color.Default);
+
+  while ((Editor.length = getline(&Editor.buffer, &Editor.size, fp)) > 0) {
+    Lea_read(speed, Editor.buffer);
   };
 
   fclose(fp);
   
-  free(linbuf), linbuf = NULL;
+  free(Editor.buffer), Editor.buffer = NULL;
 
-  linlen = 0, siz = 0;
+  Editor.length = 0, Editor.size = 0;
 }
 
 void Lea_trigger_core(unsigned short speed, const char *path) {
@@ -143,21 +159,30 @@ void Lea_trigger_core(unsigned short speed, const char *path) {
   Lea_read_from_file(path, speed);
 }
 
+void Lea_help() {
+  perror(" - Usage: lea --file file.lea");
+  exit(-1);
+}
+
 int main(int argc, char *argv[]){
 
   unsigned speed = 100;
+
+  if (argc <= 1) Lea_help();
 
   for (unsigned short i = 1; i <= argc; ++i) {
 
     if (strcmp(argv[1], "--file") == 0 
     || strcmp(argv[1], "-f") == 0) {
+      Lea_set_terminal_read_only();
       Lea_trigger_core(speed, argv[2]);
       break;
     }
 
+    else Lea_help();
   }
 
-  (void) Lea_on_exit();
+  Lea_on_exit();
 
 	return 0;
 }
