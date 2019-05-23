@@ -22,6 +22,8 @@ struct LeaConfig {
   char *buffer;
   ssize_t length;
   size_t size;
+  unsigned int speed;
+  struct termios state;
 };
 
 typedef struct ColorsCollection {
@@ -65,6 +67,6 @@ void Lea_init();
 
 void Lea_read_from_file(const char *path, unsigned short speed);
 
-void Lea_trigger_core(unsigned short speed, const char *path);
+void Lea_trigger_core(unsigned int speed, const char *path);
 
 #endif // _LEA_H_
